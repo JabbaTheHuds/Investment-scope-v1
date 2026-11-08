@@ -10,8 +10,9 @@ export function buildMarketSummary(g: GlobalResponse, currency: Currency): strin
   const out: string[] = [];
   const d = g.data;
   if (d.totalMarketCap != null && d.marketCapChange24hPct != null) {
-    const dir = d.marketCapChange24hPct > 0 ? "risen" : d.marketCapChange24hPct < 0 ? "fallen" : "been flat";
-    out.push(`Total crypto market capitalization is ${formatCompactMoney(d.totalMarketCap, currency)}, having ${dir} ${formatPct(Math.abs(d.marketCapChange24hPct)).replace("+", "")} over 24 hours (USD basis).`);
+    const pct = formatPct(Math.abs(d.marketCapChange24hPct)).replace("+", "");
+    const move = pct === "0.00%" ? "essentially unchanged" : d.marketCapChange24hPct > 0 ? `up ${pct}` : `down ${pct}`;
+    out.push(`Total crypto market capitalization is ${formatCompactMoney(d.totalMarketCap, currency)}, ${move} over 24 hours (USD basis).`);
   }
   const a = g.analysis;
   if (a) {

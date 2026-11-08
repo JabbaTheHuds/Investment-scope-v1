@@ -7,10 +7,19 @@ const s = (v: string | null | undefined): string | null => (typeof v === "string
 const pick = (m: Record<string, number | null> | null | undefined, c: string) => n(m?.[c]);
 const pickStr = (m: Record<string, string | null> | null | undefined, c: string) => s(m?.[c]);
 
-function cleanSparkline(arr: (number | null)[] | null | undefined): number[] | null {
+/** Max points kept for 7d sparklines (~168 hourly points upstream) — keeps list payloads small on mobile. */
+export const SPARKLINE_MAX_POINTS = 56;
+
+export function cleanSparkline(arr: (number | null)[] | null | undefined, maxPoints = SPARKLINE_MAX_POINTS): number[] | null {
   if (!arr || arr.length === 0) return null;
-  const out = arr.filter((x): x is number => typeof x === "number" && Number.isFinite(x));
-  return out.length >= 2 ? out : null;
+  const pts = arr.filter((x): x is number => typeof x === "number" && Number.isFinite(x));
+  if (pts.length < 2) return null;
+  if (pts.length <= maxPoints) return pts;
+  // Even-stride downsample that always keeps the first and last (most recent) point.
+  const out: number[] = [];
+  const step = (pts.length - 1) / (maxPoints - 1);
+  for (let i = 0; i < maxPoints; i++) out.push(pts[Math.round(i * step)]!);
+  return out;
 }
 
 export function normalizeMarketItem(m: CgMarketItem): MarketRow {

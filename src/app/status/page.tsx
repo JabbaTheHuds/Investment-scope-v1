@@ -41,7 +41,8 @@ export default function StatusPage() {
             {d.sources.length === 0 ? (
               <p className="p-4 text-sm text-muted">No upstream requests yet{d.mode === "demo" ? " (demo mode makes none)" : ""}.</p>
             ) : (
-              <table className="w-full text-sm">
+              <div className="relative overflow-x-auto scroll-thin">
+              <table className="w-full min-w-[560px] text-sm">
                 <thead className="text-left text-xs text-muted"><tr className="border-b border-line"><th className="px-4 py-2 font-medium">Source</th><th className="px-3 py-2 font-medium">State</th><th className="px-3 py-2 font-medium">Last success</th><th className="px-3 py-2 font-medium">Requests / failures</th><th className="px-4 py-2 font-medium">Last error</th></tr></thead>
                 <tbody>
                   {d.sources.map((x) => (
@@ -55,6 +56,7 @@ export default function StatusPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </Card>
           <Card>

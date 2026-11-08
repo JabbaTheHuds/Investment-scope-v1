@@ -39,8 +39,8 @@ export function SearchBox() {
       return;
     }
     const ctrl = new AbortController();
+    setStatus("loading");
     const t = setTimeout(async () => {
-      setStatus("loading");
       try {
         const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`, { signal: ctrl.signal });
         const body = await res.json();

@@ -7,8 +7,8 @@ import { formatPrice } from "@/lib/format";
 import type { Envelope, MarketRow } from "@/lib/market/types";
 
 export default function CoinIndexPage() {
-  const { currency, favorites } = usePrefs();
-  const m = usePolled<Envelope<MarketRow[]>>(`/api/markets?currency=${currency}&perPage=250&page=1`, 60_000);
+  const { currency, favorites, ready } = usePrefs();
+  const m = usePolled<Envelope<MarketRow[]>>(ready ? `/api/markets?currency=${currency}&perPage=250&page=1` : null, 60_000);
   const rows = m.data?.data ?? [];
   const favRows = rows.filter((r) => favorites.includes(r.id));
   const list = (title: string, items: MarketRow[]) => (
@@ -35,7 +35,7 @@ export default function CoinIndexPage() {
         <p className="mt-1 text-sm text-muted">Choose an asset, or press <kbd className="rounded border border-line px-1 text-xs">/</kbd> to search by name, ticker or contract address.</p>
       </div>
       {m.error && !m.data && <ErrorState message={m.error.message} onRetry={m.refetch} />}
-      {m.loading && !m.data && <Skeleton className="h-48 w-full" />}
+      {(m.loading || !ready) && !m.data && <Skeleton className="h-48 w-full" />}
       {favRows.length > 0 && list("Your favourites", favRows)}
       {rows.length > 0 && list("Largest by market cap", rows.slice(0, 12))}
     </div>

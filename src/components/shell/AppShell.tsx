@@ -38,7 +38,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <aside
         className={cx(
           "fixed inset-y-0 left-0 z-40 w-60 shrink-0 border-r border-line bg-panel transition-transform lg:sticky lg:top-0 lg:h-dvh lg:translate-x-0",
-          navOpen ? "translate-x-0" : "-translate-x-full",
+          navOpen ? "translate-x-0" : "-translate-x-full max-lg:invisible",
         )}
         aria-label="Primary"
       >

@@ -16,6 +16,6 @@ export function getProvider(): MarketDataProvider {
   g.__cryptoscopeProvider =
     cfg.DATA_MODE === "demo"
       ? new DemoProvider()
-      : new CoinGeckoProvider({ plan: cfg.COINGECKO_PLAN, apiKey: cfg.COINGECKO_API_KEY, ratePerMin: cfg.COINGECKO_RATE_LIMIT_PER_MIN });
+      : new CoinGeckoProvider({ plan: cfg.COINGECKO_PLAN, apiKey: cfg.COINGECKO_API_KEY, ratePerMin: cfg.COINGECKO_RATE_LIMIT_PER_MIN, baseUrl: cfg.COINGECKO_BASE_URL });
   return g.__cryptoscopeProvider;
 }

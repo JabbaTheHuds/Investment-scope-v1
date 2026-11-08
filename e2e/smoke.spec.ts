@@ -13,6 +13,7 @@ test("overview shows demo banner, global stats and top assets", async ({ page })
 
 test("search navigates to a coin page with a rendered chart", async ({ page }) => {
   await page.goto("/");
+  await page.waitForLoadState("networkidle"); // shortcut is active once the app has hydrated
   await page.keyboard.press("/");
   await page.keyboard.type("aurora");
   const option = page.getByRole("option", { name: /Aurora Demo/ });

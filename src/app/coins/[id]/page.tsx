@@ -14,8 +14,8 @@ import type { CoinDetail, Envelope } from "@/lib/market/types";
 
 export default function CoinPage() {
   const { id } = useParams<{ id: string }>();
-  const { currency, favorites, toggleFavorite, timeZone } = usePrefs();
-  const coin = usePolled<Envelope<CoinDetail>>(`/api/coins/${encodeURIComponent(id)}?currency=${currency}`, 60_000);
+  const { currency, favorites, toggleFavorite, timeZone, ready } = usePrefs();
+  const coin = usePolled<Envelope<CoinDetail>>(ready ? `/api/coins/${encodeURIComponent(id)}?currency=${currency}` : null, 60_000);
   const [chart, setChart] = useState<ChartResponse | null>(null);
   const onCandles = useCallback((c: ChartResponse | null) => setChart(c), []);
   const c = coin.data?.data;
@@ -29,7 +29,7 @@ export default function CoinPage() {
     <div className="space-y-4 animate-in">
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           {c ? <AssetIcon src={c.image} symbol={c.symbol} size={40} /> : <Skeleton className="h-10 w-10 rounded-full" />}
           <div>
             <div className="flex flex-wrap items-center gap-2">
@@ -50,13 +50,13 @@ export default function CoinPage() {
 
       {coin.error && !c && <ErrorState message={coin.error.message} onRetry={coin.refetch} />}
 
-      <div className="grid gap-4 xl:grid-cols-3">
-        <div className="space-y-4 xl:col-span-2">
+      <div className="grid gap-4 xl:grid-cols-3 [&>*]:min-w-0">
+        <div className="min-w-0 space-y-4 xl:col-span-2">
           <PriceChart coinId={id} onCandles={onCandles} />
           {c && <Performance c={c} />}
           <IndicatorSnapshot chart={chart} />
         </div>
-        <div className="space-y-4">
+        <div className="min-w-0 space-y-4">
           {c ? <KeyStats c={c} /> : <Card className="p-4"><Skeleton className="h-64 w-full" /></Card>}
           {c && <About c={c} />}
         </div>
@@ -144,9 +144,9 @@ function About({ c }: { c: CoinDetail }) {
             <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted">Contracts</p>
             <ul className="space-y-1">
               {c.platforms.slice(0, 8).map((p) => (
-                <li key={p.chain} className="flex items-center gap-2 text-xs">
+                <li key={p.chain} className="flex min-w-0 items-center gap-2 text-xs">
                   <span className="w-28 shrink-0 truncate text-muted">{p.chain}</span>
-                  <code className="truncate font-mono">{p.address}</code>
+                  <code className="min-w-0 flex-1 truncate font-mono">{p.address}</code>
                   <button onClick={() => navigator.clipboard?.writeText(p.address)} className="shrink-0 rounded border border-line px-1.5 text-[10px] text-muted hover:text-fg" aria-label={`Copy ${p.chain} contract address`}>Copy</button>
                 </li>
               ))}
@@ -176,7 +176,7 @@ function Venues({ c, timeZone }: { c: CoinDetail; timeZone: string }) {
   return (
     <Card>
       <CardHeader title="Exchange markets" subtitle="Venue-specific prices (not aggregated) — top pairs by USD volume. Anomalous tickers are excluded." />
-      <div className="overflow-x-auto scroll-thin">
+      <div className="relative overflow-x-auto scroll-thin">
         <table className="w-full min-w-[720px] text-sm">
           <caption className="sr-only">Exchange markets for {c.name}</caption>
           <thead className="text-left text-xs text-muted">

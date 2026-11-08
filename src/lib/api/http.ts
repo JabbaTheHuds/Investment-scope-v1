@@ -15,11 +15,18 @@ function limiter() {
 }
 
 function clientKey(req: NextRequest) {
-  return req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("x-real-ip") || "local";
+  // The right-most X-Forwarded-For entry is the one appended by our own reverse proxy;
+  // left-most entries are client-controlled and could be spoofed to evade rate limiting.
+  const xff = req.headers.get("x-forwarded-for")?.split(",").map((s) => s.trim()).filter(Boolean);
+  return xff?.at(-1) || req.headers.get("x-real-ip") || "local";
 }
 
 export const CurrencyParam = z.enum(SUPPORTED_CURRENCIES).default("usd");
-export const CoinIdParam = z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/, "invalid asset id");
+// Provider ids are lowercase slugs; some contain "." or "_". Path traversal ("..") is rejected.
+export const CoinIdParam = z
+  .string()
+  .regex(/^[a-z0-9][a-z0-9._-]{0,127}$/, "invalid asset id")
+  .refine((s) => !s.includes(".."), "invalid asset id");
 
 export function service() {
   return new MarketService(getProvider());

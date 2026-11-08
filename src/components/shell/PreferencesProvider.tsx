@@ -1,6 +1,6 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { SUPPORTED_CURRENCIES, type ChartRange, type Currency } from "@/lib/market/types";
+import { CHART_RANGES, SUPPORTED_CURRENCIES, type ChartRange, type Currency } from "@/lib/market/types";
 
 export type Theme = "dark" | "light" | "system";
 export type ChartType = "candles" | "line" | "area";
@@ -49,16 +49,65 @@ interface Ctx extends Preferences {
 
 const PrefCtx = createContext<Ctx | null>(null);
 
+const THEMES: Theme[] = ["dark", "light", "system"];
+const CHART_TYPES: ChartType[] = ["candles", "line", "area"];
+const OVERLAY_IDS: Overlay[] = ["sma20", "sma50", "sma200", "ema20", "bb"];
+const isStrArr = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
+
+function validTimeZone(tz: unknown): string {
+  if (typeof tz !== "string" || tz === "") return "";
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: tz });
+    return tz;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Parses stored preferences field by field. Anything invalid or from an older
+ * version falls back to its default, so corrupted storage can never break the app.
+ */
+export function parsePreferences(raw: string | null): Preferences {
+  if (!raw) return DEFAULTS;
+  let o: Record<string, unknown>;
+  try {
+    const v = JSON.parse(raw);
+    if (!v || typeof v !== "object" || Array.isArray(v)) return DEFAULTS;
+    o = v as Record<string, unknown>;
+  } catch {
+    return DEFAULTS;
+  }
+  const pick = <T,>(v: unknown, allowed: readonly T[], d: T): T => (allowed.includes(v as T) ? (v as T) : d);
+  let dashboard = DEFAULTS.dashboard;
+  if (Array.isArray(o.dashboard)) {
+    const seen = new Set<WidgetId>();
+    const saved = (o.dashboard as unknown[]).filter((w): w is WidgetPref => {
+      if (!w || typeof w !== "object") return false;
+      const { id, visible } = w as WidgetPref;
+      if (!DEFAULT_WIDGETS.some((d) => d.id === id) || typeof visible !== "boolean" || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+    // Keep the saved layout but append any widgets introduced since it was saved.
+    dashboard = [...saved.map((w) => ({ id: w.id, visible: w.visible })), ...DEFAULT_WIDGETS.filter((d) => !seen.has(d.id))];
+  }
+  return {
+    currency: pick(o.currency, SUPPORTED_CURRENCIES, DEFAULTS.currency),
+    theme: pick(o.theme, THEMES, DEFAULTS.theme),
+    timeZone: validTimeZone(o.timeZone),
+    chartType: pick(o.chartType, CHART_TYPES, DEFAULTS.chartType),
+    chartRange: pick(o.chartRange, CHART_RANGES, DEFAULTS.chartRange),
+    overlays: isStrArr(o.overlays) ? [...new Set(o.overlays.filter((x): x is Overlay => OVERLAY_IDS.includes(x as Overlay)))] : DEFAULTS.overlays,
+    showVolume: typeof o.showVolume === "boolean" ? o.showVolume : DEFAULTS.showVolume,
+    favorites: isStrArr(o.favorites) ? [...new Set(o.favorites)].slice(0, 500) : DEFAULTS.favorites,
+    dashboard,
+  };
+}
+
 function load(): Preferences {
   try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return DEFAULTS;
-    const p = { ...DEFAULTS, ...JSON.parse(raw) } as Preferences;
-    if (!SUPPORTED_CURRENCIES.includes(p.currency)) p.currency = "usd";
-    // Keep saved layout but add any widgets introduced since it was saved.
-    const known = new Set(p.dashboard.map((w) => w.id));
-    p.dashboard = [...p.dashboard.filter((w) => DEFAULT_WIDGETS.some((d) => d.id === w.id)), ...DEFAULT_WIDGETS.filter((d) => !known.has(d.id))];
-    return p;
+    return parsePreferences(localStorage.getItem(KEY));
   } catch {
     return DEFAULTS;
   }

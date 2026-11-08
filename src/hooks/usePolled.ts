@@ -39,8 +39,8 @@ export function usePolled<T>(url: string | null, intervalMs: number): Polled<T> 
       const res = await fetch(u, { signal: ctrl.signal, cache: "no-store" });
       const body = await res.json().catch(() => null);
       if (urlRef.current !== u) return;
-      if (!res.ok) {
-        setError({ status: res.status, code: body?.error?.code ?? "http_error", message: body?.error?.message ?? `Request failed (${res.status})` });
+      if (!res.ok || body == null) {
+        setError({ status: res.status, code: body?.error?.code ?? "http_error", message: body?.error?.message ?? (res.ok ? "Invalid response from server" : `Request failed (${res.status})`) });
       } else {
         setData(body as T);
         setError(null);

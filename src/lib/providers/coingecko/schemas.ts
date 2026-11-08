@@ -41,7 +41,8 @@ export const CgMarketItem = z.object({
   price_change_percentage_30d_in_currency: num,
   price_change_percentage_1y_in_currency: num,
 });
-export const CgMarkets = z.array(CgMarketItem);
+/** Validated item-by-item so one malformed row cannot discard the whole page. */
+export const CgMarkets = z.array(z.unknown());
 export type CgMarketItem = z.infer<typeof CgMarketItem>;
 
 export const CgGlobal = z.object({

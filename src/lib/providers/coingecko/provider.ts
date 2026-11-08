@@ -3,7 +3,7 @@ import { NotFoundError, ProviderError, RateLimitedError, ValidationError } from 
 import { recordFailure, recordSuccess } from "@/lib/market/status";
 import type { ChartData, ChartRange, CoinDetail, Currency, GlobalStats, MarketDataProvider, MarketRow, ProviderCapabilities, SearchResult } from "@/lib/market/types";
 import { TokenBucket } from "@/lib/cache/token-bucket";
-import { CgCategories, CgCoin, CgGlobal, CgMarketChart, CgMarkets, CgOhlc, CgSearch } from "./schemas";
+import { CgCategories, CgCoin, CgGlobal, CgMarketChart, CgMarketItem, CgMarkets, CgOhlc, CgSearch } from "./schemas";
 import { buildChart, normalizeCoin, normalizeGlobal, normalizeMarketItem, normalizeSearch, ohlcGranularity } from "./normalize";
 
 export type CoinGeckoPlan = "public" | "demo" | "pro";
@@ -12,6 +12,8 @@ export interface CoinGeckoOptions {
   plan: CoinGeckoPlan;
   apiKey?: string;
   ratePerMin: number;
+  /** Override the API base URL (tests, or a self-hosted caching proxy). */
+  baseUrl?: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
 }
@@ -37,7 +39,7 @@ export class CoinGeckoProvider implements MarketDataProvider {
   private readonly timeoutMs: number;
 
   constructor(private readonly opts: CoinGeckoOptions) {
-    this.base = opts.plan === "pro" ? "https://pro-api.coingecko.com/api/v3" : "https://api.coingecko.com/api/v3";
+    this.base = (opts.baseUrl ?? (opts.plan === "pro" ? "https://pro-api.coingecko.com/api/v3" : "https://api.coingecko.com/api/v3")).replace(/\/+$/, "");
     this.headers = { accept: "application/json" };
     if (opts.apiKey && opts.plan === "pro") this.headers["x-cg-pro-api-key"] = opts.apiKey;
     if (opts.apiKey && opts.plan === "demo") this.headers["x-cg-demo-api-key"] = opts.apiKey;
@@ -53,9 +55,8 @@ export class CoinGeckoProvider implements MarketDataProvider {
 
   private async request<S extends z.ZodTypeAny>(path: string, params: Record<string, string>, schema: S): Promise<z.infer<S>> {
     if (!this.bucket.tryAcquire()) {
-      const err = new RateLimitedError(LABEL, Math.ceil(this.bucket.waitMs() / 1000));
-      recordFailure(ID, LABEL, err);
-      throw err;
+      // Our own outbound budget is exhausted — not a provider failure, so it is not recorded as one.
+      throw new RateLimitedError(LABEL, Math.ceil(this.bucket.waitMs() / 1000));
     }
     const url = new URL(this.base + path);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
@@ -80,6 +81,15 @@ export class CoinGeckoProvider implements MarketDataProvider {
       // A 404 means the asset doesn't exist — the provider itself is healthy.
       recordSuccess(ID, LABEL);
       throw new NotFoundError(LABEL, path);
+    }
+    if (res.status === 401 || res.status === 403) {
+      const err = new ProviderError(
+        `${LABEL} rejected the request (${res.status}). Check COINGECKO_API_KEY and that COINGECKO_PLAN matches the key type (demo or pro).`,
+        LABEL,
+        res.status,
+      );
+      recordFailure(ID, LABEL, err);
+      throw err;
     }
     if (!res.ok) {
       const err = new ProviderError(`${LABEL} responded ${res.status}`, LABEL, res.status);
@@ -119,9 +129,21 @@ export class CoinGeckoProvider implements MarketDataProvider {
       },
       CgMarkets,
     );
-    // De-duplicate by id defensively (CoinGecko pagination can shift between pages).
+    // Validate each row independently: drop malformed rows (logged) instead of failing the page,
+    // and de-duplicate by id (CoinGecko pagination can shift between pages).
     const seen = new Set<string>();
-    return data.filter((m) => (seen.has(m.id) ? false : (seen.add(m.id), true))).map(normalizeMarketItem);
+    const rows: MarketRow[] = [];
+    let dropped = 0;
+    for (const raw of data) {
+      const r = CgMarketItem.safeParse(raw);
+      if (!r.success) { dropped++; continue; }
+      if (seen.has(r.data.id)) continue;
+      seen.add(r.data.id);
+      rows.push(normalizeMarketItem(r.data));
+    }
+    if (dropped) console.warn(`[coingecko] dropped ${dropped} malformed market row(s) on page ${page}`);
+    if (data.length > 0 && rows.length === 0) throw new ValidationError(LABEL, "no valid market rows in response");
+    return rows;
   }
 
   async getGlobal(currency: Currency): Promise<GlobalStats> {
@@ -172,9 +194,9 @@ export class CoinGeckoProvider implements MarketDataProvider {
         found.push({ id: c.id, name: c.name, symbol: c.symbol.toUpperCase(), rank: c.market_cap_rank ?? null, thumb: c.image?.thumb ?? null, matchedBy: "contract", chain: p });
       }
       if (found.length) return found;
-      if (results.every((r) => r.status === "rejected" && !(r.reason instanceof NotFoundError))) {
-        throw (results[0] as PromiseRejectedResult).reason;
-      }
+      // Only report "no match" if every platform positively answered 404; otherwise surface the failure.
+      const failure = results.find((r): r is PromiseRejectedResult => r.status === "rejected" && !(r.reason instanceof NotFoundError));
+      if (failure) throw failure.reason;
       return [];
     }
     const data = await this.request("/search", { query: q }, CgSearch);

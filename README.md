@@ -54,7 +54,7 @@ COINGECKO_RATE_LIMIT_PER_MIN=25
 | `npm run build && npm start` | Production build and server |
 | `npm run typecheck` | TypeScript strict check |
 | `npm test` | Unit and integration tests (Vitest) |
-| `npm run test:e2e` | Playwright smoke tests (build first; runs in demo mode) |
+| `npm run test:e2e` | Playwright suites (build first): demo mode, plus live mode against a local CoinGecko stand-in |
 | `npm run db:generate` / `npm run db:migrate` | Prisma client / apply migrations (needed from Phase 2) |
 
 ## Documentation

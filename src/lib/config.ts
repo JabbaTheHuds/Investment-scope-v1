@@ -6,6 +6,11 @@ const EnvSchema = z.object({
   COINGECKO_PLAN: z.enum(["public", "demo", "pro"]).default("public"),
   COINGECKO_API_KEY: z.string().optional().transform((v) => (v && v.trim() ? v.trim() : undefined)),
   COINGECKO_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).max(1000).default(20),
+  COINGECKO_BASE_URL: z
+    .string()
+    .optional()
+    .transform((v) => (v && v.trim() ? v.trim() : undefined))
+    .pipe(z.url({ protocol: /^https?$/ }).optional()),
   API_RATE_LIMIT_PER_MIN: z.coerce.number().int().min(1).max(100_000).default(120),
 });
 

@@ -66,6 +66,11 @@ export function formatDate(iso: string | null | undefined, timeZone?: string, wi
   if (!iso) return DASH;
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return DASH;
+  // Date-only values ("2015-07-30") are calendar dates, not instants — never shift them by time zone.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    timeZone = "UTC";
+    withTime = false;
+  }
   return new Intl.DateTimeFormat(undefined, {
     year: "numeric", month: "short", day: "numeric",
     ...(withTime ? { hour: "2-digit", minute: "2-digit", timeZoneName: "short" } : {}),

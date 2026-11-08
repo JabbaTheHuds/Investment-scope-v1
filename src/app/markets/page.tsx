@@ -15,9 +15,9 @@ function MarketsInner() {
   const params = useSearchParams();
   const router = useRouter();
   const path = usePathname();
-  const { currency } = usePrefs();
+  const { currency, ready } = usePrefs();
   const page = Math.min(MAX_PAGE, Math.max(1, Number(params.get("page")) || 1));
-  const m = usePolled<Envelope<MarketRow[]>>(`/api/markets?currency=${currency}&perPage=${PER_PAGE}&page=${page}`, 60_000);
+  const m = usePolled<Envelope<MarketRow[]>>(ready ? `/api/markets?currency=${currency}&perPage=${PER_PAGE}&page=${page}` : null, 60_000);
   const go = (p: number) => router.push(`${path}?page=${p}`);
   const rows = m.data?.data ?? null;
   const hasNext = (rows?.length ?? 0) === PER_PAGE && page < MAX_PAGE;
@@ -35,12 +35,12 @@ function MarketsInner() {
         {m.error && !m.data ? (
           <div className="p-4"><ErrorState message={m.error.message} onRetry={m.refetch} /></div>
         ) : (
-          <MarketTable rows={rows} loading={m.loading} caption={`Cryptocurrency markets, page ${page}`} />
+          <MarketTable rows={rows} loading={m.loading || !ready} caption={`Cryptocurrency markets, page ${page}`} />
         )}
         <nav aria-label="Pagination" className="flex items-center justify-between border-t border-line px-4 py-3 text-sm">
           <button onClick={() => go(page - 1)} disabled={page <= 1} className="rounded-md border border-line px-3 py-1 disabled:opacity-40">← Previous</button>
           <span className="tabular text-muted">
-            Page {page} · ranks {(page - 1) * PER_PAGE + 1}–{(page - 1) * PER_PAGE + (rows?.length ?? PER_PAGE)}
+            {rows && rows.length === 0 ? `Page ${page} · no assets` : `Page ${page} · ranks ${(page - 1) * PER_PAGE + 1}–${(page - 1) * PER_PAGE + (rows?.length ?? PER_PAGE)}`}
           </span>
           <button onClick={() => go(page + 1)} disabled={!hasNext} className="rounded-md border border-line px-3 py-1 disabled:opacity-40">Next →</button>
         </nav>

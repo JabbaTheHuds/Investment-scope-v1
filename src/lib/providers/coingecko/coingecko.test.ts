@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { categoriesFixture, coinFixture, globalFixture, marketsFixture } from "../../../../tests/fixtures/coingecko";
 import { NotFoundError, ProviderError, RateLimitedError, ValidationError } from "@/lib/market/errors";
-import { CgCoin, CgGlobal, CgMarkets } from "./schemas";
+import { z } from "zod";
+import { CgCoin, CgGlobal, CgMarketItem } from "./schemas";
 import { buildChart, normalizeCoin, normalizeGlobal, normalizeMarketItem, stripHtml } from "./normalize";
 import { CoinGeckoProvider } from "./provider";
 
@@ -11,7 +12,7 @@ function jsonRes(body: unknown, status = 200, headers: Record<string, string> = 
 
 describe("CoinGecko normalization", () => {
   it("normalizes market rows and preserves nulls instead of inventing zeros", () => {
-    const rows = CgMarkets.parse(marketsFixture).map(normalizeMarketItem);
+    const rows = z.array(CgMarketItem).parse(marketsFixture).map(normalizeMarketItem);
     expect(rows[0]).toMatchObject({ id: "bitcoin", symbol: "BTC", price: 70000, change1h: 0.12, change24h: 1.45, change30d: -2.1, marketCapChange24h: 19e9 });
     expect(rows[0]!.sparkline7d).toEqual([68000, 68500, 69000, 70000]); // null dropped
     const odd = rows[1]!;
@@ -22,7 +23,7 @@ describe("CoinGecko normalization", () => {
   });
 
   it("keeps assets that share a ticker distinct by id", () => {
-    const rows = CgMarkets.parse(marketsFixture).map(normalizeMarketItem);
+    const rows = z.array(CgMarketItem).parse(marketsFixture).map(normalizeMarketItem);
     expect(rows.filter((r) => r.symbol === "BTC").map((r) => r.id)).toEqual(["bitcoin", "obscure-token"]);
   });
 

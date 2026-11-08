@@ -10,9 +10,9 @@ export type FreshnessState = "fresh" | "delayed" | "stale" | "demo" | "loading";
 /** Data older than 3× its refresh interval is considered stale even if no error was reported. */
 export function freshnessState(meta: DataMeta | null | undefined, error: ApiErrorShape | null, now: number): FreshnessState {
   if (!meta) return "loading";
-  if (meta.mode === "demo") return "demo";
   const age = now - Date.parse(meta.fetchedAt);
   if (meta.stale || error || age > meta.refreshIntervalSec * 3 * 1000) return "stale";
+  if (meta.mode === "demo") return "demo";
   if (age > meta.refreshIntervalSec * 1.5 * 1000) return "delayed";
   return "fresh";
 }

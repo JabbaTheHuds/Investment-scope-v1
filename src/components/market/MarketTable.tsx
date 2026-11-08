@@ -51,7 +51,7 @@ export function MarketTable({ rows, loading, compact, caption }: { rows: MarketR
   };
 
   return (
-    <div className="overflow-x-auto scroll-thin">
+    <div className="relative overflow-x-auto scroll-thin">
       <table className="w-full min-w-[760px] text-sm">
         <caption className="sr-only">{caption}</caption>
         <thead className="sticky top-0 z-10 bg-panel text-left text-xs text-muted">
@@ -78,6 +78,11 @@ export function MarketTable({ rows, loading, compact, caption }: { rows: MarketR
                 <td colSpan={13} className="px-3 py-2.5"><Skeleton className="h-5 w-full" /></td>
               </tr>
             ))}
+          {sorted && sorted.length === 0 && (
+            <tr>
+              <td colSpan={13} className="px-4 py-6 text-center text-sm text-muted">No assets to show.</td>
+            </tr>
+          )}
           {sorted?.map((r) => {
             const fav = favorites.includes(r.id);
             return (

@@ -20,11 +20,11 @@ const WIDGET_LABEL: Record<WidgetId, string> = {
 };
 
 export default function OverviewPage() {
-  const { currency, dashboard, set } = usePrefs();
+  const { currency, dashboard, set, ready } = usePrefs();
   const [customizing, setCustomizing] = useState(false);
-  const global = usePolled<GlobalResponse>(`/api/global?currency=${currency}`, 60_000);
+  const global = usePolled<GlobalResponse>(ready ? `/api/global?currency=${currency}` : null, 60_000);
   // Same cache key as the breadth sample on the server → no extra provider request.
-  const markets = usePolled<Envelope<MarketRow[]>>(`/api/markets?currency=${currency}&perPage=250&page=1`, 60_000);
+  const markets = usePolled<Envelope<MarketRow[]>>(ready ? `/api/markets?currency=${currency}&perPage=250&page=1` : null, 60_000);
 
   const move = (i: number, d: -1 | 1) => {
     const next = [...dashboard];
@@ -37,7 +37,7 @@ export default function OverviewPage() {
   const widgets: Record<WidgetId, React.ReactNode> = {
     stats: <GlobalStatsWidget g={global} />,
     summary: <SummaryWidget g={global} />,
-    movers: <MoversWidget m={markets} />,
+    movers: <MoversWidget m={markets} ready={ready} />,
     favorites: <FavoritesWidget m={markets} />,
     table: (
       <Card>
@@ -49,7 +49,7 @@ export default function OverviewPage() {
         {markets.error && !markets.data ? (
           <div className="p-4"><ErrorState message={markets.error.message} onRetry={markets.refetch} /></div>
         ) : (
-          <MarketTable rows={markets.data?.data.slice(0, 25) ?? null} loading={markets.loading} compact caption="Top 25 assets by market capitalization" />
+          <MarketTable rows={markets.data?.data.slice(0, 25) ?? null} loading={markets.loading || !ready} compact caption="Top 25 assets by market capitalization" />
         )}
       </Card>
     ),
@@ -182,7 +182,7 @@ function SummaryWidget({ g }: { g: GlobalPoll }) {
 /** Movers are limited to the top 250 with non-zero volume, to avoid ranking illiquid micro-caps. */
 const MOVER_MAX_RANK = 250;
 
-function MoversWidget({ m }: { m: MarketsPoll }) {
+function MoversWidget({ m, ready }: { m: MarketsPoll; ready: boolean }) {
   const rows = m.data?.data ?? [];
   const eligible = rows.filter((r) => r.change24h != null && r.rank != null && r.rank <= MOVER_MAX_RANK && (r.volume24h ?? 0) > 0);
   const gainers = [...eligible].sort((a, b) => b.change24h! - a.change24h!).slice(0, 6);
@@ -190,8 +190,8 @@ function MoversWidget({ m }: { m: MarketsPoll }) {
   if (m.error && !m.data) return <ErrorState title="Top movers unavailable" message={m.error.message} onRetry={m.refetch} />;
   return (
     <div className="grid gap-4 md:grid-cols-2 [&>*]:min-w-0">
-      <MoverList title="Top gainers (24h)" rows={gainers} loading={m.loading} />
-      <MoverList title="Top decliners (24h)" rows={losers} loading={m.loading} />
+      <MoverList title="Top gainers (24h)" rows={gainers} loading={m.loading || !ready} />
+      <MoverList title="Top decliners (24h)" rows={losers} loading={m.loading || !ready} />
     </div>
   );
 }

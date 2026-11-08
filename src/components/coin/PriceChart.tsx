@@ -11,6 +11,7 @@ import {
   type ISeriesApi,
   type SeriesType,
   type Time,
+  TickMarkType,
   type UTCTimestamp,
 } from "lightweight-charts";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -32,6 +33,19 @@ const OVERLAYS: { id: Overlay; label: string; color: string; period: number }[] 
   { id: "bb", label: "Bollinger (20, 2)", color: "#8b93a1", period: 20 },
 ];
 
+/** Axis tick labels in the user's chosen time zone (the library defaults to UTC). */
+export function tickLabel(t: number, type: TickMarkType, timeZone?: string): string {
+  const d = new Date(t * 1000);
+  const f = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat(undefined, { ...o, timeZone }).format(d);
+  switch (type) {
+    case TickMarkType.Year: return f({ year: "numeric" });
+    case TickMarkType.Month: return f({ month: "short" });
+    case TickMarkType.DayOfMonth: return f({ day: "numeric", month: "short" });
+    case TickMarkType.Time: return f({ hour: "2-digit", minute: "2-digit" });
+    default: return f({ hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
+}
+
 function cssVar(name: string) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
@@ -49,14 +63,37 @@ interface Legend {
 }
 
 export function PriceChart({ coinId, onCandles }: { coinId: string; onCandles?: (c: ChartResponse | null) => void }) {
-  const { currency, chartType, chartRange, overlays, showVolume, set, timeZone } = usePrefs();
-  const res = usePolled<ChartResponse>(`/api/coins/${coinId}/chart?currency=${currency}&range=${chartRange}`, 5 * 60_000);
+  const { currency, chartType, chartRange, overlays, showVolume, set, timeZone, ready } = usePrefs();
+  const res = usePolled<ChartResponse>(ready ? `/api/coins/${encodeURIComponent(coinId)}/chart?currency=${currency}&range=${chartRange}` : null, 5 * 60_000);
   const wrapRef = useRef<HTMLDivElement>(null);
   const elRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const [legend, setLegend] = useState<Legend | null>(null);
   const [themeTick, setThemeTick] = useState(0);
   const [isFull, setIsFull] = useState(false);
+  const [canFull, setCanFull] = useState(false);
+  const menuRef = useRef<HTMLDetailsElement>(null);
+
+  // Close the indicators menu on an outside tap/click or Escape.
+  useEffect(() => {
+    const close = () => menuRef.current?.removeAttribute("open");
+    const onDown = (e: PointerEvent) => {
+      if (menuRef.current?.open && !menuRef.current.contains(e.target as Node)) close();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && menuRef.current?.open) {
+        close();
+        menuRef.current.querySelector("summary")?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, []);
+  useEffect(() => setCanFull(!!document.fullscreenEnabled && typeof wrapRef.current?.requestFullscreen === "function"), []);
 
   useEffect(() => {
     const onFs = () => setIsFull(document.fullscreenElement === wrapRef.current);
@@ -86,7 +123,12 @@ export function PriceChart({ coinId, onCandles }: { coinId: string; onCandles?: 
       layout: { background: { type: ColorType.Solid, color: bg }, textColor: fg, fontFamily: "inherit", attributionLogo: true, panes: { separatorColor: line } },
       grid: { vertLines: { color: line + "66" }, horzLines: { color: line + "66" } },
       rightPriceScale: { borderColor: line },
-      timeScale: { borderColor: line, timeVisible: chartRange === "1" || chartRange === "7" || chartRange === "30", secondsVisible: false },
+      timeScale: {
+        borderColor: line,
+        timeVisible: chartRange === "1" || chartRange === "7" || chartRange === "30",
+        secondsVisible: false,
+        tickMarkFormatter: (t: Time, type: TickMarkType) => tickLabel(t as number, type, timeZone || undefined),
+      },
       crosshair: { mode: CrosshairMode.Normal },
       localization: {
         timeFormatter: (t: Time) => new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short", timeZone: timeZone || undefined }).format(new Date((t as number) * 1000)),
@@ -165,7 +207,7 @@ export function PriceChart({ coinId, onCandles }: { coinId: string; onCandles?: 
     <Card>
       <div ref={wrapRef} className="flex h-full flex-col bg-panel">
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-3 py-2">
-          <div role="group" aria-label="Time range" className="flex rounded-lg border border-line p-0.5">
+          <div role="group" aria-label="Time range" className="flex flex-wrap rounded-lg border border-line p-0.5">
             {CHART_RANGES.map((r) => {
               const disabled = r === "max" && maxDays != null;
               return (
@@ -180,7 +222,7 @@ export function PriceChart({ coinId, onCandles }: { coinId: string; onCandles?: 
               <button key={t} onClick={() => set("chartType", t)} aria-pressed={chartType === t} className={cx("rounded-md px-2 py-1 text-xs capitalize", chartType === t ? "bg-accent/20 text-fg" : "text-muted hover:text-fg")}>{t}</button>
             ))}
           </div>
-          <details className="relative">
+          <details ref={menuRef} className="relative">
             <summary className="cursor-pointer list-none rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:text-fg">Indicators ({overlays.length})</summary>
             <div className="absolute left-0 top-full z-20 mt-1 w-56 max-w-[80vw] rounded-lg border border-line bg-panel p-2 shadow-xl">
               {OVERLAYS.map((o) => (
@@ -199,7 +241,11 @@ export function PriceChart({ coinId, onCandles }: { coinId: string; onCandles?: 
           </details>
           <div className="ml-auto flex gap-1">
             <button onClick={exportPng} disabled={!data} className="rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:text-fg disabled:opacity-40">Export PNG</button>
-            <button onClick={fullscreen} className="rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:text-fg" aria-label="Toggle full screen chart">⤢</button>
+            {canFull && (
+              <button onClick={fullscreen} className="rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:text-fg" aria-label={isFull ? "Exit full screen" : "Full screen chart"}>
+                {isFull ? "✕" : "⤢"}
+              </button>
+            )}
           </div>
         </div>
 
