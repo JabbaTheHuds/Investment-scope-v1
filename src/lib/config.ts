@@ -22,7 +22,9 @@ export function serverConfig(): ServerConfig {
   }
   const cfg = parsed.data;
   if (cfg.DATA_MODE === "live" && cfg.COINGECKO_PLAN !== "public" && !cfg.COINGECKO_API_KEY) {
-    throw new Error(`COINGECKO_PLAN=${cfg.COINGECKO_PLAN} requires COINGECKO_API_KEY`);
+    // Degrade to the keyless public API rather than failing every request.
+    console.warn(`[config] COINGECKO_PLAN=${cfg.COINGECKO_PLAN} but no COINGECKO_API_KEY set — using the public (keyless) API.`);
+    cfg.COINGECKO_PLAN = "public";
   }
   cached = cfg;
   return cfg;
