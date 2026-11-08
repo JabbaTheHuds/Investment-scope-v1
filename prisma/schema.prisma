@@ -1,0 +1,432 @@
+// CryptoScope AI — PostgreSQL schema.
+// Phase 1 runs without a database (market data is cached in-process); this schema
+// defines the persistent model used from Phase 2 onward.
+//
+// Conventions
+//  - Financial quantities use Decimal(38,18) / Decimal(38,8) — never floats.
+//  - All timestamps are UTC (timestamptz).
+//  - Assets are keyed by an internal id plus provider-specific ids; ticker symbols are NOT unique.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Accounts ────────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime? @db.Timestamptz
+  displayName   String?
+  mfaEnabled    Boolean   @default(false)
+  createdAt     DateTime  @default(now()) @db.Timestamptz
+  updatedAt     DateTime  @updatedAt @db.Timestamptz
+  deletedAt     DateTime? @db.Timestamptz
+
+  preferences   UserPreference?
+  portfolios    Portfolio[]
+  watchlists    Watchlist[]
+  alerts        AlertRule[]
+  notifications Notification[]
+  aiReports     AiReport[]
+  auditLogs     AuditLog[]
+}
+
+model UserPreference {
+  userId      String   @id
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currency    String   @default("usd")
+  theme       String   @default("dark")
+  timeZone    String?
+  chartPrefs  Json     @default("{}")
+  dashboard   Json     @default("[]")
+  quietHours  Json?
+  updatedAt   DateTime @updatedAt @db.Timestamptz
+}
+
+// ─── Reference data ──────────────────────────────────────────────────────────
+
+model Network {
+  id          String   @id // canonical slug, e.g. "ethereum", "solana"
+  name        String
+  chainId     Int?     // EVM chain id where applicable
+  isEvm       Boolean  @default(false)
+  providerIds Json     @default("{}") // { coingecko: "ethereum", defillama: "Ethereum" }
+  contracts   AssetContract[]
+}
+
+model Asset {
+  id            String   @id @default(cuid())
+  symbol        String   // NOT unique
+  name          String
+  coingeckoId   String?  @unique
+  categories    String[]
+  imageUrl      String?
+  isStablecoin  Boolean  @default(false)
+  createdAt     DateTime @default(now()) @db.Timestamptz
+  updatedAt     DateTime @updatedAt @db.Timestamptz
+
+  contracts     AssetContract[]
+  pairsBase     MarketPair[] @relation("BasePairs")
+  pairsQuote    MarketPair[] @relation("QuotePairs")
+  quotes        Quote[]
+  candles       Candle[]
+  indicators    IndicatorSnapshot[]
+  newsLinks     NewsAssetLink[]
+
+  @@index([symbol])
+}
+
+model AssetContract {
+  assetId   String
+  asset     Asset   @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  networkId String
+  network   Network @relation(fields: [networkId], references: [id])
+  address   String  // checksummed/lowercased per network convention
+  decimals  Int?
+
+  @@id([networkId, address])
+  @@index([assetId])
+}
+
+model Venue {
+  id          String       @id // e.g. "coinbase", "binance"
+  name        String
+  kind        VenueKind
+  trustScore  String?
+  pairs       MarketPair[]
+}
+
+enum VenueKind {
+  CEX
+  DEX
+  AGGREGATE
+}
+
+model MarketPair {
+  id           String  @id @default(cuid())
+  venueId      String
+  venue        Venue   @relation(fields: [venueId], references: [id])
+  baseAssetId  String
+  baseAsset    Asset   @relation("BasePairs", fields: [baseAssetId], references: [id])
+  quoteAssetId String?
+  quoteAsset   Asset?  @relation("QuotePairs", fields: [quoteAssetId], references: [id])
+  quoteSymbol  String  // e.g. "USD", "USDT" (fiat quotes have no Asset row)
+  venueSymbol  String  // venue-native product id, e.g. "BTC-USD"
+  active       Boolean @default(true)
+
+  @@unique([venueId, venueSymbol])
+  @@index([baseAssetId])
+}
+
+// ─── Market data ─────────────────────────────────────────────────────────────
+
+enum PriceKind {
+  AGGREGATED
+  EXCHANGE
+}
+
+/// Latest known quote per asset × currency × source. Overwritten on refresh.
+model Quote {
+  assetId         String
+  asset           Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  currency        String
+  source          String
+  priceKind       PriceKind
+  venueId         String?
+  price           Decimal   @db.Decimal(38, 18)
+  marketCap       Decimal?  @db.Decimal(38, 2)
+  fdv             Decimal?  @db.Decimal(38, 2)
+  volume24h       Decimal?  @db.Decimal(38, 2)
+  change1hPct     Decimal?  @db.Decimal(18, 8)
+  change24hPct    Decimal?  @db.Decimal(18, 8)
+  change7dPct     Decimal?  @db.Decimal(18, 8)
+  circulating     Decimal?  @db.Decimal(38, 8)
+  totalSupply     Decimal?  @db.Decimal(38, 8)
+  maxSupply       Decimal?  @db.Decimal(38, 8)
+  providerTime    DateTime? @db.Timestamptz
+  fetchedAt       DateTime  @db.Timestamptz
+
+  @@id([assetId, currency, source])
+}
+
+enum CandleInterval {
+  M1
+  M5
+  M15
+  M30
+  H1
+  H4
+  D1
+  W1
+}
+
+model Candle {
+  assetId    String
+  asset      Asset          @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  source     String
+  venueId    String         @default("") // "" = aggregated
+  currency   String
+  interval   CandleInterval
+  openTime   DateTime       @db.Timestamptz
+  open       Decimal        @db.Decimal(38, 18)
+  high       Decimal        @db.Decimal(38, 18)
+  low        Decimal        @db.Decimal(38, 18)
+  close      Decimal        @db.Decimal(38, 18)
+  volume     Decimal?       @db.Decimal(38, 8)
+  volumeKind String         @default("per-candle") // or "rolling-24h"
+  ingestedAt DateTime       @default(now()) @db.Timestamptz
+
+  @@id([assetId, source, venueId, currency, interval, openTime])
+  @@index([assetId, interval, openTime(sort: Desc)])
+}
+
+model IndicatorSnapshot {
+  id         String         @id @default(cuid())
+  assetId    String
+  asset      Asset          @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  interval   CandleInterval
+  asOf       DateTime       @db.Timestamptz // close time of the last candle used
+  values     Json           // { rsi14: .., sma20: .., ... } computed by src/lib/indicators
+  candleCount Int
+  computedAt DateTime       @default(now()) @db.Timestamptz
+
+  @@unique([assetId, interval, asOf])
+  @@index([interval, asOf])
+}
+
+model MarketRegimeSnapshot {
+  id          String   @id @default(cuid())
+  asOf        DateTime @unique @db.Timestamptz
+  regime      String   // e.g. "moderate_uptrend", "elevated_volatility"
+  components  Json     // per-component scores with methodology version
+  methodology String   // version tag of the published methodology
+  computedAt  DateTime @default(now()) @db.Timestamptz
+}
+
+// ─── Portfolios ──────────────────────────────────────────────────────────────
+
+model Portfolio {
+  id           String                 @id @default(cuid())
+  userId       String
+  user         User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  baseCurrency String                 @default("usd")
+  costBasis    CostBasisMethod        @default(FIFO)
+  benchmark    String?                // asset id, e.g. bitcoin
+  createdAt    DateTime               @default(now()) @db.Timestamptz
+  transactions PortfolioTransaction[]
+
+  @@index([userId])
+}
+
+enum CostBasisMethod {
+  FIFO
+  LIFO
+  HIFO
+  AVERAGE
+}
+
+enum TxType {
+  BUY
+  SELL
+  DEPOSIT
+  WITHDRAWAL
+  TRANSFER_IN
+  TRANSFER_OUT
+  FEE
+  INCOME
+}
+
+model PortfolioTransaction {
+  id          String    @id @default(cuid())
+  portfolioId String
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  type        TxType
+  assetId     String
+  quantity    Decimal   @db.Decimal(38, 18)
+  unitPrice   Decimal?  @db.Decimal(38, 18) // null = cost basis unknown
+  priceCurrency String  @default("usd")
+  feeAmount   Decimal?  @db.Decimal(38, 18)
+  feeAssetId  String?
+  occurredAt  DateTime  @db.Timestamptz
+  note        String?
+  importBatch String?   // CSV import id for idempotent re-imports
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+
+  @@index([portfolioId, occurredAt])
+}
+
+// ─── Watchlists & alerts ─────────────────────────────────────────────────────
+
+model Watchlist {
+  id        String          @id @default(cuid())
+  userId    String
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  items     WatchlistItem[]
+  createdAt DateTime        @default(now()) @db.Timestamptz
+
+  @@index([userId])
+}
+
+model WatchlistItem {
+  watchlistId String
+  watchlist   Watchlist @relation(fields: [watchlistId], references: [id], onDelete: Cascade)
+  assetId     String
+  position    Int
+  addedAt     DateTime  @default(now()) @db.Timestamptz
+
+  @@id([watchlistId, assetId])
+}
+
+enum AlertStatus {
+  ACTIVE
+  PAUSED
+  TRIGGERED
+  EXPIRED
+}
+
+model AlertRule {
+  id             String         @id @default(cuid())
+  userId         String
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assetId        String?
+  kind           String         // price_above, pct_move, rsi_threshold, ma_cross, volume_spike, news, portfolio_value ...
+  params         Json
+  status         AlertStatus    @default(ACTIVE)
+  cooldownSec    Int            @default(3600)
+  lastEvaluatedAt DateTime?     @db.Timestamptz
+  lastTriggeredAt DateTime?     @db.Timestamptz
+  createdAt      DateTime       @default(now()) @db.Timestamptz
+  notifications  Notification[]
+
+  @@index([status, assetId])
+  @@index([userId])
+}
+
+enum DeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  SUPPRESSED
+}
+
+model Notification {
+  id           String         @id @default(cuid())
+  userId       String
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  alertId      String?
+  alert        AlertRule?     @relation(fields: [alertId], references: [id], onDelete: SetNull)
+  channel      String         // in_app, email, push
+  title        String
+  body         String
+  triggerValue Json?          // market value & timestamp that caused the trigger
+  dedupeKey    String?
+  status       DeliveryStatus @default(PENDING)
+  error        String?
+  createdAt    DateTime       @default(now()) @db.Timestamptz
+  readAt       DateTime?      @db.Timestamptz
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+// ─── News & AI ───────────────────────────────────────────────────────────────
+
+model NewsArticle {
+  id           String          @id @default(cuid())
+  source       String
+  url          String          @unique
+  title        String
+  publisher    String
+  publishedAt  DateTime        @db.Timestamptz
+  summary      String?         // short, original summary — never the full copyrighted text
+  significance String?         // low | moderate | high | critical
+  classifiedBy String?         // methodology version
+  ingestedAt   DateTime        @default(now()) @db.Timestamptz
+  assets       NewsAssetLink[]
+
+  @@index([publishedAt(sort: Desc)])
+}
+
+model NewsAssetLink {
+  articleId  String
+  article    NewsArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  assetId    String
+  asset      Asset       @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  confidence Decimal     @db.Decimal(5, 4)
+
+  @@id([articleId, assetId])
+}
+
+model AiReport {
+  id             String   @id @default(cuid())
+  userId         String?
+  user           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  kind           String   // asset_report, daily_briefing, chat_answer
+  assetId        String?
+  promptVersion  String
+  model          String
+  dataAsOf       DateTime @db.Timestamptz
+  inputs         Json     // the validated data objects the model was given
+  output         Json     // schema-validated structured output
+  sources        Json
+  createdAt      DateTime @default(now()) @db.Timestamptz
+
+  @@index([assetId, createdAt(sort: Desc)])
+}
+
+// ─── Operations ──────────────────────────────────────────────────────────────
+
+model DataSourceStatus {
+  id                  String    @id
+  label               String
+  lastSuccessAt       DateTime? @db.Timestamptz
+  lastFailureAt       DateTime? @db.Timestamptz
+  lastError           String?
+  consecutiveFailures Int       @default(0)
+  updatedAt           DateTime  @updatedAt @db.Timestamptz
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  DEAD
+}
+
+model BackgroundJob {
+  id          String    @id @default(cuid())
+  queue       String
+  name        String
+  payload     Json
+  status      JobStatus @default(QUEUED)
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5)
+  runAt       DateTime  @default(now()) @db.Timestamptz
+  lastError   String?
+  createdAt   DateTime  @default(now()) @db.Timestamptz
+  finishedAt  DateTime? @db.Timestamptz
+
+  @@index([queue, status, runAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  target    String?
+  ip        String?
+  metadata  Json?
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  @@index([userId, createdAt(sort: Desc)])
+}
