@@ -1,0 +1,24 @@
+# Render Blueprint — one-click deploy of CryptoScope AI (Phase 1) with live CoinGecko data.
+# In Render: New → Blueprint → select this repository.
+services:
+  - type: web
+    name: cryptoscope-ai
+    runtime: node
+    plan: free
+    branch: claude/admiring-brown-yyewst
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/status
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATA_MODE
+        value: live
+      - key: COINGECKO_PLAN
+        value: demo
+      # Free key from https://www.coingecko.com/en/api — Render asks for it during setup.
+      - key: COINGECKO_API_KEY
+        sync: false
+      - key: COINGECKO_RATE_LIMIT_PER_MIN
+        value: "25"
